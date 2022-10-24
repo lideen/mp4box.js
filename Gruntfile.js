@@ -36,7 +36,7 @@ module.exports = function(grunt) {
               'src/box-print.js',                 // simple print
               'src/mp4box.js'                     // application level operations (data append, sample extraction, segmentation, ...)
         ],
-        dest: 'dist/<%= pkg.name %>.all.js'
+        dest: 'dist/mp4box.all.js'
       },
       simple: {
         src: ['src/log-simple.js',
@@ -59,22 +59,22 @@ module.exports = function(grunt) {
               'src/box-print.js',
               'src/mp4box.js'
         ],
-        dest: 'dist/<%= pkg.name %>.simple.js'
+        dest: 'dist/mp4box.simple.js'
       },
     },
     uglify: {
       options: {
-        banner: '/*! <%= pkg.name %> <%= grunt.template.today("dd-mm-yyyy") %> */\n',
+        banner: '/*! mp4box <%= grunt.template.today("dd-mm-yyyy") %> */\n',
         sourceMap: true
       },
       all: {
         files: {
-          'dist/<%= pkg.name %>.all.min.js': ['<%= concat.all.dest %>']
+          'dist/mp4box.all.min.js': ['<%= concat.all.dest %>']
         }
       },
       simple: {
         files: {
-          'dist/<%= pkg.name %>.simple.min.js': ['<%= concat.simple.dest %>']
+          'dist/mp4box.simple.min.js': ['<%= concat.simple.dest %>']
         }
       },
     },
