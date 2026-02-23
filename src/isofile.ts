@@ -30,7 +30,7 @@ import { mehdBox } from '#/boxes/mehd';
 import { metaBox } from '#/boxes/meta';
 import { mfhdBox } from '#/boxes/mfhd';
 import { mvhdBox } from '#/boxes/mvhd';
-import { stppSampleEntry } from '#/boxes/sampleentries';
+import { mp4aSampleEntry, stppSampleEntry } from '#/boxes/sampleentries';
 import {
   AudioSampleEntry,
   HintSampleEntry,
@@ -515,7 +515,7 @@ export class ISOFile<TSegmentUser = unknown, TSampleUser = unknown> {
       this.updateSampleLists();
 
       /* If the application needs to be informed that the 'moov' has been found,
-         we create the information object and callback the application */
+               we create the information object and callback the application */
       if (this.onReady && !this.readySent) {
         this.readySent = true;
         this.onReady(this.getInfo());
@@ -537,7 +537,7 @@ export class ISOFile<TSegmentUser = unknown, TSampleUser = unknown> {
     } else {
       if (this.nextParsePosition) {
         /* moov has not been parsed but the first buffer was received,
-           the next fetch should probably be the next box start */
+                   the next fetch should probably be the next box start */
         nextFileStart = this.nextParsePosition;
       } else {
         /* No valid buffer has been parsed yet, we cannot know what to parse next */
@@ -754,8 +754,8 @@ export class ISOFile<TSegmentUser = unknown, TSampleUser = unknown> {
     if (!this.sampleProcessingStarted) return;
 
     /* For each track marked for fragmentation,
-       check if the next sample is there (i.e. if the sample information is known (i.e. moof has arrived) and if it has been downloaded)
-       and create a fragment with it */
+           check if the next sample is there (i.e. if the sample information is known (i.e. moof has arrived) and if it has been downloaded)
+           and create a fragment with it */
     if (this.isFragmentationInitialized && this.onSegment !== undefined) {
       const consumedTracks = new Set<number>();
       while (
@@ -859,8 +859,8 @@ export class ISOFile<TSegmentUser = unknown, TSampleUser = unknown> {
             }
 
             /* A fragment is created by a collection of samples, but the segment is the accumulation in the
-            buffer of these fragments. It is flushed only as requested by the application (nb_samples)
-            to avoid too many callbacks */
+                        buffer of these fragments. It is flushed only as requested by the application (nb_samples)
+                        to avoid too many callbacks */
             if (isSegmentBoundary || isSizeBoundary || isFlush) {
               if (isSegmentOverdue) {
                 Log.warn(
@@ -914,7 +914,7 @@ export class ISOFile<TSegmentUser = unknown, TSampleUser = unknown> {
 
     if (this.onSamples !== undefined) {
       /* For each track marked for data export,
-         check if the next sample is there (i.e. has been downloaded) and send it */
+               check if the next sample is there (i.e. has been downloaded) and send it */
       for (let i = 0; i < this.extractedTracks.length; i++) {
         const extractTrak = this.extractedTracks[i];
         const trak = extractTrak.trak;
@@ -1038,7 +1038,7 @@ export class ISOFile<TSegmentUser = unknown, TSampleUser = unknown> {
   }
 
   /* Finds the byte offset for a given time on a given track
-     also returns the time of the previous rap */
+       also returns the time of the previous rap */
   seekTrack(time: number, useRap: boolean, trak: trakBox) {
     let rap_seek_sample_num = 0;
     let seek_sample_num = 0;
@@ -1140,7 +1140,7 @@ export class ISOFile<TSegmentUser = unknown, TSampleUser = unknown> {
         seek_info = { offset: this.nextParsePosition, time: 0 };
       } else {
         /* check if the seek position is already in some buffer and
-         in that case return the end of that buffer (or of the last contiguous buffer) */
+                 in that case return the end of that buffer (or of the last contiguous buffer) */
         /* TODO: Should wait until append operations are done */
         seek_info.offset = this.stream.getEndFilePositionAfter(seek_info.offset);
       }
@@ -1234,23 +1234,31 @@ export class ISOFile<TSegmentUser = unknown, TSampleUser = unknown> {
     const stream = new DataStream();
     ftyp.write(stream);
 
-    /* we can now create the new mvex box */
-    const mvex = moov.addBox(new mvexBox());
-    if (total_duration) {
-      const mehd = mvex.addBox(new mehdBox());
-      mehd.fragment_duration = total_duration;
-    }
+    const restoreCallbacks = ISOFile.normalizeAudioSampleEntriesForFragmentedInit(moov.traks);
 
-    // Add trex boxes for each track
-    for (let i = 0; i < moov.traks.length; i++) {
-      const trex = mvex.addBox(new trexBox());
-      trex.track_id = moov.traks[i].tkhd.track_id;
-      trex.default_sample_description_index = 1;
-      trex.default_sample_duration = moov.traks[i].samples[0]?.duration ?? 0;
-      trex.default_sample_size = 0;
-      trex.default_sample_flags = 1 << 16;
+    try {
+      /* we can now create the new mvex box */
+      const mvex = moov.addBox(new mvexBox());
+      if (total_duration) {
+        const mehd = mvex.addBox(new mehdBox());
+        mehd.fragment_duration = total_duration;
+      }
+
+      // Add trex boxes for each track
+      for (let i = 0; i < moov.traks.length; i++) {
+        const trex = mvex.addBox(new trexBox());
+        trex.track_id = moov.traks[i].tkhd.track_id;
+        trex.default_sample_description_index = 1;
+        trex.default_sample_duration = moov.traks[i].samples[0]?.duration ?? 0;
+        trex.default_sample_size = 0;
+        trex.default_sample_flags = 1 << 16;
+      }
+      moov.write(stream);
+    } finally {
+      for (let i = restoreCallbacks.length - 1; i >= 0; i--) {
+        restoreCallbacks[i]();
+      }
     }
-    moov.write(stream);
 
     return stream.buffer;
   }
@@ -1269,6 +1277,43 @@ export class ISOFile<TSegmentUser = unknown, TSampleUser = unknown> {
     stream.isofile = this;
     this.write(stream);
     return stream;
+  }
+
+  /** @bundle isofile-write.js */
+  private static normalizeAudioSampleEntriesForFragmentedInit(traks: Array<trakBox>) {
+    const restoreCallbacks: Array<() => void> = [];
+
+    for (const trak of traks) {
+      const sampleEntries = trak.mdia.minf.stbl.stsd?.entries ?? [];
+      const mp4aSampleEntries = sampleEntries.filter(entry => entry instanceof mp4aSampleEntry);
+
+      for (const mp4aSampleEntry of mp4aSampleEntries) {
+        const esds = mp4aSampleEntry.esds ?? mp4aSampleEntry.wave?.esds;
+
+        if (!esds) {
+          continue;
+        }
+
+        const previousEsds = mp4aSampleEntry.esds;
+        const previousWave = mp4aSampleEntry.wave;
+        const previousBoxes = mp4aSampleEntry.boxes;
+
+        restoreCallbacks.push(() => {
+          mp4aSampleEntry.esds = previousEsds;
+          mp4aSampleEntry.wave = previousWave;
+          mp4aSampleEntry.boxes = previousBoxes;
+        });
+
+        const boxesWithoutWave = Array.isArray(mp4aSampleEntry.boxes)
+          ? mp4aSampleEntry.boxes.filter(box => box?.type !== 'wave' && box?.type !== 'esds')
+          : [];
+        mp4aSampleEntry.esds = esds;
+        mp4aSampleEntry.boxes = [...boxesWithoutWave, esds];
+        mp4aSampleEntry.wave = undefined;
+      }
+    }
+
+    return restoreCallbacks;
   }
 
   /** @bundle isofile-write.js */
@@ -1295,6 +1340,7 @@ export class ISOFile<TSegmentUser = unknown, TSampleUser = unknown> {
         );
         continue;
       }
+
       moov.addBox(trak);
     }
 
@@ -2409,7 +2455,7 @@ export class ISOFile<TSegmentUser = unknown, TSampleUser = unknown> {
       /* we had enough bytes to get its type and size and it's an 'mdat' */
 
       /* special handling for mdat boxes, since we don't actually need to parse it linearly
-		   we create the box */
+                        we create the box */
       const box = new mdatBox(ret.size);
       this.parsingMdat = box;
       this.boxes.push(box);
@@ -2435,12 +2481,12 @@ export class ISOFile<TSegmentUser = unknown, TSampleUser = unknown> {
         /* determine the next position in the file to start parsing from */
         if (!this.moovStartFound) {
           /* moov not find yet,
-				   the file probably has 'mdat' at the beginning, and 'moov' at the end,
-				   indicate that the downloader should not try to download those bytes now */
+                                         the file probably has 'mdat' at the beginning, and 'moov' at the end,
+                                         indicate that the downloader should not try to download those bytes now */
           this.nextParsePosition = box.start + box.size;
         } else {
           /* we have the start of the moov box,
-				   the next bytes should try to complete the current 'mdat' */
+                                       the next bytes should try to complete the current 'mdat' */
           this.nextParsePosition = this.stream.findEndContiguousBuf();
         }
         /* not much we can do, wait for more buffers to arrive */
@@ -2456,14 +2502,14 @@ export class ISOFile<TSegmentUser = unknown, TSampleUser = unknown> {
         }
       }
       /* either it's not an mdat box (and we need to parse it, we cannot skip it)
-		   (TODO: we could skip 'free' boxes ...)
-			   or we did not have enough data to parse the type and size of the box,
-		   we try to concatenate the current buffer with the next buffer to restart parsing */
+                       (TODO: we could skip 'free' boxes ...)
+                           or we did not have enough data to parse the type and size of the box,
+                       we try to concatenate the current buffer with the next buffer to restart parsing */
       const merged = this.stream.mergeNextBuffer ? this.stream.mergeNextBuffer() : false;
       if (merged) {
         /* The next buffer was contiguous, the merging succeeded,
-			   we can now continue parsing,
-			   the next best position to parse is at the end of this new buffer */
+                               we can now continue parsing,
+                               the next best position to parse is at the end of this new buffer */
         this.nextParsePosition = this.stream.getEndPosition();
         return true;
       } else {
@@ -2471,12 +2517,12 @@ export class ISOFile<TSegmentUser = unknown, TSampleUser = unknown> {
         /* The next best position to parse is still at the end of this old buffer */
         if (!ret.type) {
           /* There were not enough bytes in the buffer to parse the box type and length,
-				   the next fetch should retrieve those missing bytes, i.e. the next bytes after this buffer */
+                                       the next fetch should retrieve those missing bytes, i.e. the next bytes after this buffer */
           this.nextParsePosition = this.stream.getEndPosition();
         } else {
           /* we had enough bytes to parse size and type of the incomplete box
-				   if we haven't found yet the moov box, skip this one and try the next one
-				   if we have found the moov box, let's continue linear parsing */
+                                       if we haven't found yet the moov box, skip this one and try the next one
+                                       if we have found the moov box, let's continue linear parsing */
           if (this.moovStartFound) {
             this.nextParsePosition = this.stream.getEndPosition();
           } else {
@@ -2567,8 +2613,8 @@ export class ISOFile<TSegmentUser = unknown, TSampleUser = unknown> {
       return true;
     } else {
       /* we don't have the end of this mdat yet,
-		   indicate that the next byte to fetch is the end of the buffers we have so far,
-		   return and wait for more buffer to come */
+                       indicate that the next byte to fetch is the end of the buffers we have so far,
+                       return and wait for more buffer to come */
       this.nextParsePosition = this.stream.findEndContiguousBuf();
       return false;
     }
