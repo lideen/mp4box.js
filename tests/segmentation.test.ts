@@ -1,5 +1,8 @@
 import fs from 'fs';
+import path from 'path';
 import { createFile, MP4BoxBuffer, MultiBufferStream } from '../entries/all';
+import { waveBox } from '../src/boxes/qt/wave';
+import { mp4aSampleEntry } from '../src/boxes/sampleentries/sampleentry';
 import { getFilePath, loadAndGetInfo } from './common';
 
 // Saves the segments to a file
@@ -345,5 +348,43 @@ describe('File Segmentation', () => {
     initMp4.appendBuffer(MP4BoxBuffer.fromArrayBuffer(combinedInit.buffer, 0));
     initMp4.flush();
     expect(initMp4.getInfo().tracks.length).toBe(2);
+  });
+
+  it('writes a direct esds in init segment and restores source sample entry state', async () => {
+    const fixtureFile = path.join(import.meta.dirname, 'fixtures', 'wave-esds.mov');
+    const { mp4 } = await loadAndGetInfo(fixtureFile, true, true);
+
+    const audioTrack = mp4.moov?.traks.find(trak => trak.mdia?.hdlr?.handler === 'soun');
+    expect(audioTrack).toBeDefined();
+    if (!audioTrack) {
+      throw new Error('Missing audio track');
+    }
+    const audioTrackId = audioTrack.tkhd.track_id;
+    const sampleEntry = audioTrack.mdia.minf.stbl.stsd.entries[0] as mp4aSampleEntry;
+    expect(sampleEntry).toBeInstanceOf(mp4aSampleEntry);
+    expect(sampleEntry.wave).toBeInstanceOf(waveBox);
+    expect(sampleEntry.esds).toBeUndefined();
+    expect(sampleEntry.boxes?.some(box => box.type === 'wave')).toBe(true);
+    expect(sampleEntry.boxes?.some(box => box.type === 'esds')).toBe(false);
+
+    const originalWave = sampleEntry.wave;
+
+    mp4.setSegmentOptions(audioTrackId, undefined, { nbSamples: 50 });
+    const initSegment = mp4.initializeSegmentation();
+
+    const initMp4 = createFile(true);
+    initMp4.appendBuffer(MP4BoxBuffer.fromArrayBuffer(initSegment.buffer, 0));
+    initMp4.flush();
+
+    const initAudioTrack = initMp4.getTrackById(audioTrackId);
+    const initSampleEntry = initAudioTrack.mdia.minf.stbl.stsd.entries[0] as mp4aSampleEntry;
+
+    expect(initSampleEntry.boxes?.some(box => box.type === 'esds')).toBe(true);
+    expect(initSampleEntry.boxes?.some(box => box.type === 'wave')).toBe(false);
+
+    expect(sampleEntry.wave).toBe(originalWave);
+    expect(sampleEntry.esds).toBeUndefined();
+    expect(sampleEntry.boxes?.some(box => box.type === 'wave')).toBe(true);
+    expect(sampleEntry.boxes?.some(box => box.type === 'esds')).toBe(false);
   });
 });
