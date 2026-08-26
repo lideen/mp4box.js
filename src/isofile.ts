@@ -369,16 +369,6 @@ export class ISOFile<TSegmentUser = unknown, TSampleUser = unknown> {
     }
   }
 
-  private recordMoovStart(info: MoovStartInfo) {
-    if (this.moovStartFound) return;
-
-    this.moovStartFound = true;
-    this.moovStartInfo = info;
-    if (this.mdats.length === 0) {
-      this.isProgressive = true;
-    }
-  }
-
   parse() {
     const parseBoxHeadersOnly = false;
 
@@ -438,7 +428,11 @@ export class ISOFile<TSegmentUser = unknown, TSampleUser = unknown> {
               case 'skip':
                 break;
               case 'moov':
-                this.recordMoovStart({ type: 'moov', start: boxStart, size: box.size });
+                this.moovStartInfo ??= { start: boxStart, size: box.size };
+                this.moovStartFound = true;
+                if (this.mdats.length === 0) {
+                  this.isProgressive = true;
+                }
               /* no break */
               /* falls through */
               default:
@@ -2603,7 +2597,11 @@ export class ISOFile<TSegmentUser = unknown, TSampleUser = unknown> {
       /* box is incomplete, we may not even know its type */
       if (ret.type === 'moov' && ret.start !== undefined && ret.size !== undefined) {
         /* the incomplete box is a 'moov' box */
-        this.recordMoovStart({ type: ret.type, start: ret.start, size: ret.size });
+        this.moovStartInfo ??= { start: ret.start, size: ret.size };
+        this.moovStartFound = true;
+        if (this.mdats.length === 0) {
+          this.isProgressive = true;
+        }
       }
       /* either it's not an mdat box (and we need to parse it, we cannot skip it)
 		   (TODO: we could skip 'free' boxes ...)

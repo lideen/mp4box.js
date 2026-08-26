@@ -140,7 +140,7 @@ describe('File Creation', () => {
 
 describe('given a moov box split across buffers', () => {
   describe('when its header is appended', () => {
-    it('should report the box type, start, and size before the box is complete', () => {
+    it('should report its start and size before the box is complete', () => {
       const mp4 = createFile();
       const starts: Array<MoovStartInfo> = [];
       mp4.onMoovStart = info => starts.push(info);
@@ -154,7 +154,7 @@ describe('given a moov box split across buffers', () => {
 
       mp4.appendBuffer(MP4BoxBuffer.fromArrayBuffer(firstBuffer, 0));
 
-      expect(starts).toEqual([{ type: 'moov', start: 8, size: 16 }]);
+      expect(starts).toEqual([{ start: 8, size: 16 }]);
       expect(mp4.getBox('moov')).toBeUndefined();
 
       const secondBuffer = new ArrayBuffer(8);
@@ -165,6 +165,26 @@ describe('given a moov box split across buffers', () => {
       mp4.appendBuffer(MP4BoxBuffer.fromArrayBuffer(secondBuffer, 16));
 
       expect(starts).toHaveLength(1);
+    });
+  });
+});
+
+describe('given a complete moov box', () => {
+  describe('when it is appended', () => {
+    it('should report its start and size', () => {
+      const mp4 = createFile();
+      const starts: Array<MoovStartInfo> = [];
+      mp4.onMoovStart = info => starts.push(info);
+
+      const buffer = new ArrayBuffer(8);
+      const view = new DataView(buffer);
+      view.setUint32(0, 8);
+      new Uint8Array(buffer, 4, 4).set(new TextEncoder().encode('moov'));
+
+      mp4.appendBuffer(MP4BoxBuffer.fromArrayBuffer(buffer, 0));
+
+      expect(starts).toEqual([{ start: 0, size: 8 }]);
+      expect(mp4.getBox('moov')).toBeDefined();
     });
   });
 });

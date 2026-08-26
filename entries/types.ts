@@ -250,7 +250,6 @@ export interface IncompleteBox {
 }
 
 export interface MoovStartInfo {
-  readonly type: 'moov';
   readonly start: number;
   readonly size: number;
 }
