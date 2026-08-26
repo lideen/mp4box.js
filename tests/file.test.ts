@@ -4,6 +4,7 @@ import {
   Endianness,
   MP4BoxBuffer,
   MultiBufferStream,
+  type MoovStartInfo,
   type Sample,
 } from '../entries/all';
 import { getFilePath, getFileRange, loadAndGetInfo } from './common';
@@ -134,5 +135,36 @@ describe('File Creation', () => {
 
     // Check if the sample is extracted correctly
     expect(sampleCount).toBe(0);
+  });
+});
+
+describe('given a moov box split across buffers', () => {
+  describe('when its header is appended', () => {
+    it('should report the box type, start, and size before the box is complete', () => {
+      const mp4 = createFile();
+      const starts: Array<MoovStartInfo> = [];
+      mp4.onMoovStart = info => starts.push(info);
+
+      const firstBuffer = new ArrayBuffer(16);
+      const firstView = new DataView(firstBuffer);
+      firstView.setUint32(0, 8);
+      new Uint8Array(firstBuffer, 4, 4).set(new TextEncoder().encode('free'));
+      firstView.setUint32(8, 16);
+      new Uint8Array(firstBuffer, 12, 4).set(new TextEncoder().encode('moov'));
+
+      mp4.appendBuffer(MP4BoxBuffer.fromArrayBuffer(firstBuffer, 0));
+
+      expect(starts).toEqual([{ type: 'moov', start: 8, size: 16 }]);
+      expect(mp4.getBox('moov')).toBeUndefined();
+
+      const secondBuffer = new ArrayBuffer(8);
+      const secondView = new DataView(secondBuffer);
+      secondView.setUint32(0, 8);
+      new Uint8Array(secondBuffer, 4, 4).set(new TextEncoder().encode('free'));
+
+      mp4.appendBuffer(MP4BoxBuffer.fromArrayBuffer(secondBuffer, 16));
+
+      expect(starts).toHaveLength(1);
+    });
   });
 });

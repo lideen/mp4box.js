@@ -91,6 +91,7 @@ import type {
   FragmentedTrack,
   IncompleteBox,
   Item,
+  MoovStartInfo,
   Movie,
   Output,
   SegmentationInitialization,
@@ -163,9 +164,10 @@ export class ISOFile<TSegmentUser = unknown, TSampleUser = unknown> {
   /** Boolean used to fire moov start event only once */
   moovStartFound = false;
   /** Callback called when the moov parsing starts */
-  onMoovStart?: () => void;
+  onMoovStart?: (info: MoovStartInfo) => void;
   /** Boolean keeping track of the call to onMoovStart, to avoid double calls */
   moovStartSent = false;
+  private moovStartInfo?: MoovStartInfo;
   /** Callback called when the moov is entirely parsed */
   onReady?: (info: Movie) => void;
   /** Boolean keeping track of the call to onReady, to avoid double calls */
@@ -367,6 +369,16 @@ export class ISOFile<TSegmentUser = unknown, TSampleUser = unknown> {
     }
   }
 
+  private recordMoovStart(info: MoovStartInfo) {
+    if (this.moovStartFound) return;
+
+    this.moovStartFound = true;
+    this.moovStartInfo = info;
+    if (this.mdats.length === 0) {
+      this.isProgressive = true;
+    }
+  }
+
   parse() {
     const parseBoxHeadersOnly = false;
 
@@ -387,6 +399,7 @@ export class ISOFile<TSegmentUser = unknown, TSampleUser = unknown> {
         if (this.saveParsePosition) {
           this.saveParsePosition();
         }
+        const boxStart = this.stream.getPosition();
         const ret = parseOneBox(this.stream, parseBoxHeadersOnly);
         if (ret.code === ERR_NOT_ENOUGH_DATA) {
           if (this.processIncompleteBox) {
@@ -425,10 +438,7 @@ export class ISOFile<TSegmentUser = unknown, TSampleUser = unknown> {
               case 'skip':
                 break;
               case 'moov':
-                this.moovStartFound = true;
-                if (this.mdats.length === 0) {
-                  this.isProgressive = true;
-                }
+                this.recordMoovStart({ type: 'moov', start: boxStart, size: box.size });
               /* no break */
               /* falls through */
               default:
@@ -507,7 +517,7 @@ export class ISOFile<TSegmentUser = unknown, TSampleUser = unknown> {
     /* Check if the moovStart callback needs to be called */
     if (this.moovStartFound && !this.moovStartSent) {
       this.moovStartSent = true;
-      if (this.onMoovStart) this.onMoovStart();
+      if (this.onMoovStart && this.moovStartInfo) this.onMoovStart(this.moovStartInfo);
     }
 
     if (this.moov) {
@@ -2591,12 +2601,9 @@ export class ISOFile<TSegmentUser = unknown, TSampleUser = unknown> {
       }
     } else {
       /* box is incomplete, we may not even know its type */
-      if (ret.type === 'moov') {
+      if (ret.type === 'moov' && ret.start !== undefined && ret.size !== undefined) {
         /* the incomplete box is a 'moov' box */
-        this.moovStartFound = true;
-        if (this.mdats.length === 0) {
-          this.isProgressive = true;
-        }
+        this.recordMoovStart({ type: ret.type, start: ret.start, size: ret.size });
       }
       /* either it's not an mdat box (and we need to parse it, we cannot skip it)
 		   (TODO: we could skip 'free' boxes ...)

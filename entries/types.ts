@@ -249,6 +249,12 @@ export interface IncompleteBox {
   original_size?: number;
 }
 
+export interface MoovStartInfo {
+  readonly type: 'moov';
+  readonly start: number;
+  readonly size: number;
+}
+
 export interface Item {
   alreadyRead?: number;
   content_encoding?: string;
